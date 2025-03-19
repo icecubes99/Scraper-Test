@@ -1,4 +1,32 @@
-apify-client>=1.0.0
-bs4>=0.0.1
-httpx>=0.24.0
+# Core web scraping dependencies
+selenium>=4.10.0
+webdriver-manager>=3.9.0
 beautifulsoup4>=4.12.0
+bs4>=0.0.1
+
+# Networking and HTTP handling
+requests>=2.31.0
+httpx>=0.24.0
+apify-client>=1.0.0
+
+# HTML parsing alternatives
+lxml>=4.9.3
+html5lib>=1.1
+
+# Performance optimization
+joblib>=1.3.0
+tqdm>=4.66.0
+
+# Error handling and logging
+python-dotenv>=1.0.0
+loguru>=0.7.0
+
+# Scheduling and rate limiting
+schedule>=1.2.0
+ratelimit>=2.2.1
+
+# Unicode handling for special characters
+unidecode>=1.3.6
+
+# Data processing
+pandas>=2.0.0
