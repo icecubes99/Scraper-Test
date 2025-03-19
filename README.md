@@ -26,8 +26,8 @@ This project provides multiple scripts for scraping comments from Facebook posts
 1. Clone this repository:
 
    ```bash
-   git clone https://github.com/yourusername/facebook-comment-scraper.git
-   cd facebook-comment-scraper
+   git clone https://github.com/icecubes99/Scraper-Test.git
+   cd Scraper-Test
    ```
 
 2. Install dependencies:
