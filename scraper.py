@@ -4,18 +4,27 @@ from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
 from webdriver_manager.chrome import ChromeDriverManager
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
 import time
 import csv
 import datetime
-import random
 import re
+import concurrent.futures
 
 print("Setting up Chrome options...")
 chrome_options = Options()
-# chrome_options.add_argument("--headless")  # Comment this out to see the browser
+# Performance-oriented options
+chrome_options.add_argument("--headless")  # Run in headless mode for speed
 chrome_options.add_argument("--disable-gpu")
 chrome_options.add_argument("--no-sandbox")
-chrome_options.add_argument("--window-size=1920,1080")
+chrome_options.add_argument("--disable-dev-shm-usage")
+chrome_options.add_argument("--disable-extensions")
+chrome_options.add_argument("--disable-notifications")
+chrome_options.add_argument("--disable-infobars")
+chrome_options.add_argument("--mute-audio")
+chrome_options.add_argument("--blink-settings=imagesEnabled=false")  # Disable images for speed
+chrome_options.add_argument("--window-size=1280,720")  # Smaller window for less resource usage
 chrome_options.add_argument("--user-agent=Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36")
 
 # Maximum comments to collect
@@ -30,23 +39,29 @@ timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
 csv_filename = f"facebook_comments_{timestamp}.csv"
 
 print("Starting browser...")
-fb_post_url = "https://web.facebook.com/photo/?fbid=1154447183384015&set=a.362804292548312"
+fb_post_url = "https://www.facebook.com/photo/?fbid=1049393963882034&set=a.459043889583714"
 driver.get(fb_post_url)
 
+# Use WebDriverWait instead of sleep
 print("Waiting for page to load...")
-time.sleep(5)
+wait = WebDriverWait(driver, 10)  # 10-second timeout
 
 try:
     # Try to close any login popups
     try:
-        close_buttons = driver.find_elements(By.XPATH, "//div[@aria-label='Close']")
+        # Wait for popup to appear with a short timeout
+        close_buttons = wait.until(
+            EC.presence_of_all_elements_located((By.XPATH, "//div[@aria-label='Close']")),
+            message="Looking for close buttons"
+        )
+        
         if close_buttons:
             for button in close_buttons:
                 if button.is_displayed():
                     button.click()
                     print("Closed a popup")
-                    time.sleep(1)
-    except:
+                    time.sleep(0.5)  # Reduced wait time
+    except Exception:
         print("No popups found or couldn't close them")
     
     # Click view more comments buttons if present
@@ -56,21 +71,24 @@ try:
         "//div[@role='button']//span[contains(text(), 'View')]"
     ]
     
-    for pattern in view_more_patterns:
-        try:
-            buttons = driver.find_elements(By.XPATH, pattern)
-            for button in buttons:
-                if button.is_displayed():
-                    print(f"Clicking: {button.text}")
-                    driver.execute_script("arguments[0].click();", button)
-                    time.sleep(2)
-        except:
-            pass
+    # Use a single function to click all "View more" buttons
+    def click_view_more_buttons():
+        buttons_clicked = 0
+        for pattern in view_more_patterns:
+            try:
+                buttons = driver.find_elements(By.XPATH, pattern)
+                for button in buttons:
+                    if button.is_displayed():
+                        driver.execute_script("arguments[0].click();", button)
+                        buttons_clicked += 1
+                        time.sleep(0.5)  # Reduced wait time
+            except:
+                pass
+        return buttons_clicked
     
-    # Scroll to load more comments
-    print("Scrolling to load comments...")
-    scroll_count = 0
-    max_scrolls = 15
+    # Initial click on view more buttons
+    buttons_clicked = click_view_more_buttons()
+    print(f"Initially clicked {buttons_clicked} 'View more' buttons")
     
     # Define comment patterns for detection
     comment_patterns = [
@@ -81,7 +99,7 @@ try:
         "//div[contains(@class, 'x16tdsg8')]"
     ]
     
-    # Function to count visible comments
+    # Function to count visible comments - more efficient
     def count_comments():
         for pattern in comment_patterns:
             try:
@@ -92,29 +110,32 @@ try:
                 continue
         return 0
     
-    # Scroll until we have enough comments or reach max scrolls
+    # Optimized scrolling - fewer pauses, more targeted
+    print("Scrolling to load comments...")
+    scroll_count = 0
+    max_scrolls = 15  # Keep this as is, but with faster scroll cycles
     last_count = 0
     consecutive_no_change = 0
-    last_scroll_with_new_comments = 0
     
+    # More efficient scrolling
     while scroll_count < max_scrolls and consecutive_no_change < 3:
         scroll_count += 1
-        print(f"Scroll {scroll_count}/{max_scrolls}")
+        print(f"Fast scroll {scroll_count}/{max_scrolls}")
         
-        # Scroll down
-        driver.find_element(By.TAG_NAME, 'body').send_keys(Keys.END)
-        time.sleep(2 + random.random())
+        # Scroll more efficiently
+        if scroll_count % 3 == 0:
+            # Scroll to bottom every third time
+            driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+        else:
+            # Regular scroll
+            driver.find_element(By.TAG_NAME, 'body').send_keys(Keys.PAGE_DOWN)
         
-        # Try clicking "View more" buttons again after scrolling
-        for pattern in view_more_patterns:
-            try:
-                buttons = driver.find_elements(By.XPATH, pattern)
-                for button in buttons:
-                    if button.is_displayed():
-                        driver.execute_script("arguments[0].click();", button)
-                        time.sleep(1)
-            except:
-                pass
+        # Shorter wait time - just enough for content to load
+        time.sleep(1)
+        
+        # Periodically click "View more" buttons
+        if scroll_count % 2 == 0:
+            click_view_more_buttons()
         
         # Count comments after scrolling
         current_count = count_comments()
@@ -124,7 +145,6 @@ try:
         if current_count > last_count:
             last_count = current_count
             consecutive_no_change = 0
-            last_scroll_with_new_comments = scroll_count
         else:
             consecutive_no_change += 1
             
@@ -133,49 +153,83 @@ try:
             print(f"Reached target of {MAX_COMMENTS} comments")
             break
     
-    # Collect all the comments we found
+    # Collect all the comments we found - Do this faster
     print("Extracting comments...")
     comments_text = []
     
-    # Try different patterns to find comments
+    def process_comment(raw_text):
+        if not raw_text.strip():
+            return None
+            
+        # Split by newlines and process
+        lines = raw_text.split('\n')
+        if len(lines) <= 1:
+            return None
+        
+        # Define badge indicators to check for
+        badge_indicators = ["top fan", "valued commenter", "admin", "moderator", "new member", "founder"]
+        
+        # First, determine if we have a badge-name-comment structure
+        # We need to check if the first line is a badge indicator
+        first_line_is_badge = len(lines) > 0 and any(badge in lines[0].lower() for badge in badge_indicators)
+        
+        # Determine how many lines to skip
+        if first_line_is_badge:
+            lines_to_skip = 2  # Skip both badge and name
+        else:
+            lines_to_skip = 1  # Skip just the name
+        
+        # Make sure we don't try to skip more lines than we have
+        lines_to_skip = min(lines_to_skip, len(lines) - 1)
+        
+        # Remove the first lines (badge and/or name)
+        content_lines = lines[lines_to_skip:]
+        
+        # Process each line to remove timestamps and reactions
+        filtered_lines = []
+        for line in content_lines:
+            # Skip lines that are just timestamps (like "1d", "19h", etc.)
+            if re.match(r'^\d+[dhmswy]$', line.strip()):
+                continue
+            
+            # Skip lines that are just numbers (likely reaction counts)
+            if re.match(r'^\d+$', line.strip()):
+                continue
+            
+            # Skip any additional badge indicators that might appear elsewhere
+            if any(badge in line.lower() for badge in badge_indicators):
+                continue
+            
+            filtered_lines.append(line)
+        
+        # Join the filtered lines back together
+        comment_text = '\n'.join(filtered_lines)
+        
+        # Remove timestamps at the end of lines - more comprehensive regex
+        comment_text = re.sub(r'\s+\d+[dhmswy](\s+\d+)?$', '', comment_text)
+        comment_text = re.sub(r'\b\d{1,2}[ymwdhs]\b', '', comment_text)  # Remove "9y", "32w" anywhere in text
+        
+        # Only return non-empty comments
+        if comment_text.strip():
+            return comment_text
+        return None
+    
+    # Try different patterns to find comments - find the right one faster
     for pattern in comment_patterns:
         try:
             comment_elements = driver.find_elements(By.XPATH, pattern)
             if comment_elements:
                 print(f"Found {len(comment_elements)} comments using pattern: {pattern}")
                 
-                for element in comment_elements:
-                    # Get the raw text
-                    raw_text = element.text.strip()
-                    
-                    # Split by newlines and process
-                    lines = raw_text.split('\n')
-                    if len(lines) > 1:
-                        # Remove the first line (usually the name)
-                        content_lines = lines[1:]
-                        
-                        # Process each line to remove timestamps and reactions
-                        filtered_lines = []
-                        for line in content_lines:
-                            # Skip lines that are just timestamps (like "1d", "19h", etc.)
-                            if re.match(r'^\d+[dhmswy]$', line.strip()):
-                                continue
-                            
-                            # Skip lines that are just numbers (likely reaction counts)
-                            if re.match(r'^\d+$', line.strip()):
-                                continue
-                            
-                            filtered_lines.append(line)
-                        
-                        # Join the filtered lines back together
-                        comment_text = '\n'.join(filtered_lines)
-                        
-                        # Remove timestamps at the end of lines
-                        comment_text = re.sub(r'\s+\d+[dhmswy](\s+\d+)?$', '', comment_text)
-                        
-                        # Only add non-empty comments
-                        if comment_text.strip():
-                            comments_text.append(comment_text)
+                # Extract all raw texts first (faster than processing one at a time)
+                raw_texts = [element.text.strip() for element in comment_elements]
+                
+                # Process comments in parallel for speed
+                with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
+                    processed_comments = list(executor.map(process_comment, raw_texts))
+                
+                # Filter out None values and add to comments_text
+                comments_text.extend([c for c in processed_comments if c])
                 
                 # If we found comments, no need to try other patterns
                 break
@@ -186,17 +240,17 @@ try:
     if len(comments_text) > MAX_COMMENTS:
         comments_text = comments_text[:MAX_COMMENTS]
     
-    # Write to CSV file
+    # Write to CSV file - do this efficiently
     print(f"Writing {len(comments_text)} comments to {csv_filename}")
     with open(csv_filename, 'w', newline='', encoding='utf-8') as file:
         writer = csv.writer(file)
         writer.writerow(["Comment Number", "Comment Text"])  # Header
         
+        # Write all rows at once without printing each one
         for i, text in enumerate(comments_text, 1):
             writer.writerow([i, text])
-            print(f"Comment {i}: {text[:50]}..." if len(text) > 50 else text)
-    
-    print(f"Successfully saved {len(comments_text)} comments to {csv_filename}")
+            
+        print(f"Successfully saved {len(comments_text)} comments to {csv_filename}")
 
 except Exception as e:
     print(f"An error occurred: {str(e)}")
