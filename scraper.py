@@ -8,17 +8,18 @@ import time
 import csv
 import datetime
 import random
+import re
 
 print("Setting up Chrome options...")
 chrome_options = Options()
-chrome_options.add_argument("--headless")  # Uncomment to run headless
+# chrome_options.add_argument("--headless")  # Comment this out to see the browser
 chrome_options.add_argument("--disable-gpu")
 chrome_options.add_argument("--no-sandbox")
 chrome_options.add_argument("--window-size=1920,1080")
 chrome_options.add_argument("--user-agent=Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36")
 
 # Maximum comments to collect
-MAX_COMMENTS = 20
+MAX_COMMENTS = 100
 
 print("Installing ChromeDriver...")
 service = Service(ChromeDriverManager().install())
@@ -29,7 +30,7 @@ timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
 csv_filename = f"facebook_comments_{timestamp}.csv"
 
 print("Starting browser...")
-fb_post_url = "https://www.facebook.com/photo/?fbid=894303803956454&set=a.632843580102479"
+fb_post_url = "https://web.facebook.com/photo/?fbid=1154447183384015&set=a.362804292548312"
 driver.get(fb_post_url)
 
 print("Waiting for page to load...")
@@ -94,6 +95,7 @@ try:
     # Scroll until we have enough comments or reach max scrolls
     last_count = 0
     consecutive_no_change = 0
+    last_scroll_with_new_comments = 0
     
     while scroll_count < max_scrolls and consecutive_no_change < 3:
         scroll_count += 1
@@ -122,6 +124,7 @@ try:
         if current_count > last_count:
             last_count = current_count
             consecutive_no_change = 0
+            last_scroll_with_new_comments = scroll_count
         else:
             consecutive_no_change += 1
             
@@ -145,13 +148,34 @@ try:
                     # Get the raw text
                     raw_text = element.text.strip()
                     
-                    # Simple processing: split by newlines and take everything after first line
-                    # (since first line is usually the name)
+                    # Split by newlines and process
                     lines = raw_text.split('\n')
                     if len(lines) > 1:
-                        # Join all lines except the first (name) and potentially last (timestamp)
-                        comment_text = '\n'.join(lines[1:-1] if len(lines) > 2 else lines[1:])
-                        comments_text.append(comment_text)
+                        # Remove the first line (usually the name)
+                        content_lines = lines[1:]
+                        
+                        # Process each line to remove timestamps and reactions
+                        filtered_lines = []
+                        for line in content_lines:
+                            # Skip lines that are just timestamps (like "1d", "19h", etc.)
+                            if re.match(r'^\d+[dhmswy]$', line.strip()):
+                                continue
+                            
+                            # Skip lines that are just numbers (likely reaction counts)
+                            if re.match(r'^\d+$', line.strip()):
+                                continue
+                            
+                            filtered_lines.append(line)
+                        
+                        # Join the filtered lines back together
+                        comment_text = '\n'.join(filtered_lines)
+                        
+                        # Remove timestamps at the end of lines
+                        comment_text = re.sub(r'\s+\d+[dhmswy](\s+\d+)?$', '', comment_text)
+                        
+                        # Only add non-empty comments
+                        if comment_text.strip():
+                            comments_text.append(comment_text)
                 
                 # If we found comments, no need to try other patterns
                 break
